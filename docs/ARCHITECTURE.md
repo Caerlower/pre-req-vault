@@ -1,27 +1,54 @@
 # Pre-Req Vault — Architecture
 
-Diagram image: [`vault-architecture.jpg`](./vault-architecture.jpg)
+## System
 
-## Overview
+```mermaid
+flowchart LR
+  User([User wallet]) --> VaultProg[Vault program]
 
-Personal SOL vault built with Anchor. Programs are code; accounts hold state.
+  VaultProg --> VS[(vault_state PDA)]
+  VaultProg --> V[(vault PDA)]
 
-| Piece | Role |
-|-------|------|
-| **User wallet** | Signer; owns the vault |
-| **Vault program** | `initialize`, `deposit`, `withdraw`, `close` |
-| **`vault_state` PDA** | Seeds `["state", user]` — stores vault + state bumps |
-| **`vault` PDA** | Seeds `["vault", vault_state]` — holds SOL |
-| **Registration program** | External; `initialize(github)` records GitHub username |
-| **`application_account` PDA** | Seeds `["prereqs", user]` under registration program |
+  VaultProg -.->|CPI on withdraw| Reg[Registration program]
+  Reg --> App[(prereqs PDA)]
+```
 
-## Flow
+## Accounts
 
-1. **Initialize** — create `vault_state`, save bumps  
-2. **Deposit** — user → vault (user signs)  
-3. **Withdraw** — vault → user (vault PDA signs) **+ CPI** → registration `initialize` with GitHub  
-4. **Close** — drain vault, close `vault_state`, rent back to user  
+| Account | Seeds | Holds |
+|---------|--------|--------|
+| `vault_state` | `["state", user]` | bumps |
+| `vault` | `["vault", vault_state]` | SOL |
+| `application_account` | `["prereqs", user]` under registration | GitHub username |
 
-## Why CPI on withdraw
+## Instruction flow
 
-Turbin3 verifies registration happened through *your* deployed vault's withdraw path, not a standalone client call to the registration program.
+```mermaid
+sequenceDiagram
+  actor User
+  participant Vault as Vault program
+  participant VS as vault_state
+  participant V as vault
+  participant Reg as Registration program
+
+  User->>Vault: initialize
+  Vault->>VS: create + store bumps
+
+  User->>Vault: deposit(amount)
+  Vault->>V: SOL in (user signs)
+
+  User->>Vault: withdraw(amount)
+  Vault->>V: SOL out (vault PDA signs)
+  Vault->>Reg: CPI initialize(github)
+  Reg-->>Reg: write prereqs PDA
+
+  User->>Vault: close
+  Vault->>V: drain remaining SOL
+  Vault->>VS: close account
+```
+
+## Notes
+
+- Programs hold no state; accounts do.
+- Vault PDA has no private key — withdraw/close use program signer seeds.
+- Registration CPI runs only after a successful withdraw transfer.
